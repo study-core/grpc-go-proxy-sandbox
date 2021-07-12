@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -69,32 +70,46 @@ func UnaryProxyHandler(conn *grpc.ClientConn) grpc.StreamHandler {
 		if !ok {
 			return fmt.Errorf("unknown method")
 		}
-		fmt.Printf("%v\n", method)
+		fmt.Printf("Call gRPC method is: %v From proxy-server \n", method)
 
 		ctx, cancel := context.WithCancel(serverStream.Context())
 		defer cancel()
 
 		if md, ok := metadata.FromIncomingContext(serverStream.Context()); ok {
+			if b, e := json.Marshal(md); nil != e {
+				fmt.Println("Failed json marshal, err:", e)
+			} else {
+				fmt.Println("md is:", string(b))
+			}
+
 			ctx = metadata.NewOutgoingContext(ctx, md)
 		}
 
 		m := &frame{}
 
 		// client -> proxy
-		if err := serverStream.RecvMsg(m); err != nil {
-			return err
-		}
+		//for {
+			if err := serverStream.RecvMsg(m); err != nil {
+				return err
+			}
 
-		// proxy -> server
-		// proxy <- server
-		if err := conn.Invoke(ctx, method, m, m); err != nil {
-			return err
-		}
+			if b, e := json.Marshal(m); nil != e {
+				fmt.Println("Failed json marshal, err:", e)
+			} else {
+				fmt.Println("m is:", string(b), "len:", len(m.payload))
+			}
 
-		// client <- proxy
-		if err := serverStream.SendMsg(m); err != nil {
-			return err
-		}
+			// proxy -> server
+			// proxy <- server
+			if err := conn.Invoke(ctx, method, m, m); err != nil {
+				return err
+			}
+
+			// client <- proxy
+			if err := serverStream.SendMsg(m); err != nil {
+				return err
+			}
+		//}
 
 		return nil
 	}
@@ -112,7 +127,7 @@ func TwoStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.Stre
 
 func main() {
 	customCodec := newCodec()
-
+	// lianjie  server ip  port
 	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure(), grpc.WithDefaultCallOptions(grpc.ForceCodec(customCodec)))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
@@ -131,6 +146,7 @@ func main() {
 			TwoStreamInterceptor,
 		)),
 	)
+	fmt.Printf("Start Proxy :%s ... \n", port)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	}
